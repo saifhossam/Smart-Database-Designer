@@ -15,53 +15,34 @@ from validators import production_validation
 
 logger = logging.getLogger(__name__)
 
-_SYSTEM = """You are a senior database engineer converting a design plan into a production-ready schema.
+GLOBAL_RULES = """You are a secure, deterministic database design agent.
 
-Return ONLY valid JSON (no markdown):
+GLOBAL SAFETY & INTEGRITY RULES — NEVER VIOLATE THESE: [same as above]"""
+
+_SYSTEM = """{{GLOBAL_RULES}}
+
+ROLE: Schema Designer
+Convert an APPROVED SuggestionPlan into a complete, normalized DatabaseSchema.
+
+INPUT: Approved SuggestionPlan
+
+RULES:
+- Include EVERY entity from the plan as a table.
+- For every relationship, create corresponding FOREIGN KEY in the child table.
+- Every table must have id UUID PRIMARY KEY.
+- Add created_at / updated_at where appropriate.
+- Generate useful indexes.
+- Maintain 3NF normalization.
+
+OUTPUT FORMAT — Return ONLY this JSON:
 {{
-  "tables": [
-    {{
-      "name": "table_name",
-      "description": "what this table stores",
-      "columns": [
-        {{
-          "name": "id",
-          "data_type": "UUID",
-          "constraints": ["PRIMARY KEY", "NOT NULL", "DEFAULT gen_random_uuid()"],
-          "references": null,
-          "description": "Primary key"
-        }}
-      ],
-      "indexes": ["CREATE INDEX idx_table_col ON table_name(col)"]
-    }}
-  ],
-  "relationships": [
-    {{
-      "from_entity": "TableA",
-      "to_entity": "TableB",
-      "relationship_type": "one-to-many",
-      "label": "has"
-    }}
-  ],
+  "tables": [{{TableDefinition with columns and indexes}}],
+  "relationships": [{{Relationship}}],
   "normalization_level": "3NF"
 }}
-
-Rules:
-1. Every table MUST have an id UUID PRIMARY KEY.
-2. CRITICAL: For every relationship defined in the plan, you MUST create a corresponding Foreign Key column in the child table.
-3. All FK columns MUST have the 'references' property set to 'parent_table(id)'.
-4. Use snake_case for all names.
-5. Include created_at TIMESTAMP NOT NULL DEFAULT NOW() on every table with > 2 columns.
-
-DOUBEL-CHECK: Compare your 'tables' columns against the 'relationships' list to ensure no connection is missing.
-CRITICAL: Include ALL entities from the plan. Do not drop any.
-Avoid using SQL reserved keywords for table or column names. If a name like table is requested, rename it to [entity]_table.
 """
 
-_HUMAN = """Approved Suggestion Plan:
-{plan_json}
-
-Generate the complete production-ready schema for ALL entities above."""
+_HUMAN = "Approved Suggestion Plan:\n\n{plan_json}\n\nGenerate the complete production-ready schema."
 
 
 def run_schema_designer(plan: SuggestionPlan) -> DatabaseSchema:
