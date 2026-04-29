@@ -243,7 +243,7 @@ RULES:
 - Maintain logical consistency and relationships.
 - Use snake_case only and avoid SQL reserved keywords.
 - Every entity must have an id UUID primary key.
-
+- "CRITICAL: For every many-to-many relationship, explicitly include the junction table in suggested_entities with proper foreign keys to both sides."
 OUTPUT FORMAT — Return ONLY this JSON:
 
 {{

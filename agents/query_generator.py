@@ -54,7 +54,7 @@ GLOBAL SAFETY & INTEGRITY RULES — NEVER VIOLATE THESE:
 # ─────────────────────────────────────────────────────────────────────────────
 # LLM Prompt for Query Generation
 # ─────────────────────────────────────────────────────────────────────────────
-_SYSTEM = f"""{GLOBAL_QUERY_RULES}
+_SYSTEM = """{{GLOBAL_QUERY_RULES}}
 
 ROLE: Query Generator
 You are an expert SQL engineer. Generate comprehensive, safe, and useful SQL queries for the provided database schema.
