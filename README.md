@@ -1,209 +1,175 @@
-# 🗄️ DB Designer Agent System
+# 🗄️ DB Designer Agent
 
-An **AI-powered, agent-based database schema designer** with Human-in-the-Loop approval and live ERD visualization.
+**AI-Powered Database Schema Designer with Human-in-the-Loop Approval**
+
+An intelligent Streamlit application that transforms natural language requirements into production-ready database schemas, complete with ERD visualization, validation, SQL generation, and sample queries.
 
 ---
 
-## 🏗 Architecture Overview
+## ✨ Features
 
-```
-User Input (NL)
-      │
-      ▼
-┌─────────────────────────────────────────────────────────────┐
-│  Phase 1: Requirement Analyzer Agent                        │
-│  → Extracts entities, attributes, relationships             │
-│  → Uses Azure OpenAI (GPT-4o) + structured JSON output      │
-└──────────────────────────┬──────────────────────────────────┘
-                           │
-                           ▼ (+ RAG context from Azure Search)
-┌─────────────────────────────────────────────────────────────┐
-│  Phase 2: Suggestion / Planning Agent                       │
-│  → Proposes full entity model with attributes               │
-│  → Suggests optional features (RBAC, audit logs, etc.)      │
-│  → Generates live ERD via Pyvis                             │
-└──────────────────────────┬──────────────────────────────────┘
-                           │
-                           ▼
-            ┌──────────────────────────┐
-            │  ⏸  HUMAN APPROVAL GATE  │  ← Approve or Reject
-            │  ❌ NO schema until here  │
-            └──────────┬───────────────┘
-                       │ (approved)
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│  Phase 3: Schema Designer Agent                             │
-│  → Tables, columns, data types, PK/FK, indexes              │
-│  → 3NF normalised, junction tables for M:N                  │
-└──────────────────────────┬──────────────────────────────────┘
-                           ▼
-┌─────────────────────────────────────────────────────────────┐
-│  Phase 4: Validation Agent                                  │
-│  → Static checks (missing PK, broken FK refs)               │
-│  → LLM-based deep validation (3NF, data types, indexes)     │
-│  → Auto-applies corrections if errors found                 │
-└──────────────────────────┬──────────────────────────────────┘
-                           ▼
-┌─────────────────────────────────────────────────────────────┐
-│  Phase 5: Query Generator Agent                             │
-│  → CRUD queries for every table                             │
-│  → 5+ analytical queries with JOINs and aggregations        │
-└──────────────────────────┬──────────────────────────────────┘
-                           ▼
-            ┌──────────────────────────┐
-            │  Output: SQL DDL + JSON  │
-            │  + Queries + ERD diagram │
-            └──────────────────────────┘
-```
+- **Natural Language Input**: Describe your system in plain English (or Arabic) — the AI understands the domain and extracts entities, attributes, and relationships.
+- **Interactive Suggestion Plan**: Review and approve (or modify) the proposed design before schema generation.
+- **Live ERD Visualization**: Interactive entity relationship diagrams using Pyvis (draggable nodes, zoomable).
+- **Human-in-the-Loop Approval**: Schema generation **only proceeds after explicit human approval**.
+- **Automated Validation**: Hybrid rule-based + LLM-powered validation ensuring structural integrity and best practices.
+- **Auto-Recovery**: Automatically fixes common issues (missing PKs, duplicate columns, invalid FKs, etc.).
+- **3NF Normalization**: Produces clean, normalized database schemas.
+- **SQLite Database Generation**: One-click downloadable `.db` file.
+- **Query Generation**: Ready-to-use CRUD operations + analytical queries.
+- **Session Management**: Save, load, and resume design sessions.
+- **Beautiful UI**: Modern dark theme with clean, professional interface.
+
+---
+
+## 🛠️ Tech Stack
+
+- **Frontend**: Streamlit
+- **Backend**: Python 3
+- **AI Layer**: Azure OpenAI (GPT-4o-mini)
+- **Embeddings**: Azure OpenAI text-embedding-3-small
+- **Schema Modeling**: Pydantic
+- **ERD Visualization**: Pyvis
+- **Database**: SQLite (with PostgreSQL-style syntax compatibility)
+- **State Management**: Custom session persistence
 
 ---
 
 ## 📁 Project Structure
 
 ```
-db_designer_agent/
-├── app.py                        # Streamlit UI (main entry point)
-├── cli.py                        # CLI interface (alternative)
-├── orchestrator.py               # Pipeline controller + approval gate
-├── models.py                     # Pydantic data models
-├── llm_client.py                 # Azure OpenAI client factory
-├── tests.py                      # pytest test suite
-├── requirements.txt
-├── .env.example                  # Environment variable template
-│
+DB Designer Agent/
+├── app.py                          # Main Streamlit application
+├── models.py                       # Pydantic data models
+├── services/
+│   ├── orchestrator.py             # Pipeline orchestration
+│   ├── llm_service.py              # LLM client factory
+│   └── __init__.py
 ├── agents/
-│   ├── __init__.py
-│   ├── requirement_analyzer.py   # Agent 1: NL → structured analysis
-│   ├── suggestion_agent.py       # Agent 2: analysis → design plan
-│   ├── schema_designer.py        # Agent 3: plan → schema (post-approval)
-│   ├── validation_agent.py       # Agent 4: schema validation + correction
-│   └── query_generator.py        # Agent 5: schema → SQL queries
-│
-├── memory/
-│   ├── __init__.py
-│   └── session_store.py          # Session persistence + approval logging
-│
-├── rag/
-│   ├── __init__.py
-│   └── semantic_search.py        # Azure Search + ChromaDB fallback
-│
-└── utils/
-    ├── __init__.py
-    └── erd_visualizer.py         # Pyvis + Plotly ERD generation + SQL DDL
+│   ├── requirement_analyzer.py
+│   ├── suggestion_agent.py
+│   ├── schema_designer.py
+│   ├── validation_agent.py
+│   ├── query_generator.py
+│   └── __init__.py
+├── validators.py                   # Rule-based validation & recovery
+├── memory.py                       # Session persistence
+├── utils/                          # Helper utilities
+│   ├── erd_visualizer.py           # ERD generation + SQL DDL
+|   ├── report_generator.py         # Final report
+└── .env                            # Environment variables
 ```
 
 ---
 
-## ⚙️ Setup
+## 🚀 Quick Start
 
-### 1. Install dependencies
+### 1. Clone the Repository
+
+```bash
+git clone <your-repo-url>
+cd db-designer-agent
+```
+
+### 2. Install Dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Configure environment variables
+### 3. Configure Environment Variables
 
-```bash
-cp .env.example .env
-# Edit .env with your Azure OpenAI and Azure Search credentials
-```
+Create a `.env` file in the root directory:
 
-Required variables:
-```
-AZURE_OPENAI_API_KEY=...
+```env
+AZURE_OPENAI_API_KEY=your_azure_openai_key
 AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
-AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4o
-AZURE_OPENAI_EMBEDDING_DEPLOYMENT=text-embedding-ada-002
+AZURE_OPENAI_API_VERSION=2024-12-01-preview
+AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4o-mini
+AZURE_OPENAI_EMBEDDING_DEPLOYMENT=text-embedding-3-small
 ```
 
-Optional (RAG enrichment):
-```
-AZURE_SEARCH_ENDPOINT=https://your-search.search.windows.net
-AZURE_SEARCH_API_KEY=...
-AZURE_SEARCH_INDEX_NAME=db-schemas-index
-```
+### 4. Run the Application
 
-### 3. Run the application
-
-**Streamlit UI (recommended):**
 ```bash
 streamlit run app.py
 ```
 
-**CLI:**
+---
+
+## 📋 How It Works
+
+1. **Describe Requirements** — Enter your system description in natural language.
+2. **AI Analysis** — The agent analyzes entities, attributes, and relationships.
+3. **Suggestion Plan** — Review the proposed design + interactive ERD.
+4. **Human Approval** — Approve, reject, or request modifications.
+5. **Schema Generation** — AI generates a normalized `DatabaseSchema`.
+6. **Validation & Recovery** — Automatic fixing of common design issues.
+7. **Final Output**:
+   - Interactive ERD
+   - Full SQL DDL (SQLite compatible)
+   - Downloadable `.db` file
+   - CRUD + Analytical queries
+   - Validation report
+
+---
+
+## 🎯 Example Use Cases
+
+- School Management System
+- E-Commerce Platform
+- Hospital Management System
+- HR & Payroll System
+- Inventory Management
+- Any custom relational database design
+
+---
+
+## 🔧 Key Capabilities
+
+- **Robust Validation**: Prevents common anti-patterns and enforces best practices.
+- **Modification Support**: Change the plan via natural language instructions.
+- **Domain Awareness**: Understands context (education, healthcare, finance, etc.).
+- **Audit Trail**: Tracks all modifications and approvals.
+- **Fallback Mechanisms**: Graceful degradation when LLM responses are imperfect.
+
+---
+
+## 🧪 Development
+
+### Running Tests (Future)
+
 ```bash
-python cli.py
-python cli.py --input "I need an e-commerce system with products, orders, and customers"
-python cli.py --session <session_id>   # Resume a previous session
+pytest tests/
 ```
 
-### 4. Run tests
+### Adding New Features
 
-```bash
-pytest tests.py -v
-```
+The architecture is highly modular:
+- Add new agents in the `agents/` folder
+- Extend models in `models.py`
+- Update pipeline flow in `orchestrator.py`
 
 ---
 
-## 🔄 Pipeline Flow
+## 📄 License
 
-```
-User Input
-    │
-    ▼  run_pre_approval_pipeline()
-Requirement Analysis
-    │
-    ▼  + RAG context
-Suggestion Plan + Live ERD
-    │
-    ▼  ⏸ raises ApprovalRequired
-UI shows ERD + Approve / Reject buttons
-    │
-    ├── reject → reset session
-    │
-    └── approve → run_post_approval_pipeline()
-                      │
-                      ▼
-                  Schema Design
-                      │
-                      ▼
-                  Validation (+ auto-correct)
-                      │
-                      ▼
-                  Query Generation
-                      │
-                      ▼
-                  Index in RAG store
-                      │
-                      ▼
-                  Output: SQL DDL + JSON + Queries
-```
+This project is licensed under the MIT License.
 
 ---
 
-## 🛡 Risk Handling
+## 🤝 Contributing
 
-| Risk | Mitigation |
-|------|-----------|
-| Over-engineering | LLM instructed to prefer lean, domain-appropriate schemas |
-| Missing relationships | Static validator checks all FK references; LLM deep-checks |
-| Wrong normalisation | System prompt enforces 3NF; validation agent flags violations |
-| Incorrect data types | Explicit type mapping in all prompts (UUID, VARCHAR(n), DECIMAL(p,s)…) |
-| Missing constraints | Every PK/FK/UNIQUE/NOT NULL enforced by prompt + static checks |
-| Scalability | Modular tables required; single-table designs flagged as errors |
-| No iteration support | Session memory + iteration counter; reload previous sessions via CLI/UI |
+Contributions, issues, and feature requests are welcome!
+
+1. Fork the project
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
 ---
 
-## 💡 Key Design Decisions
+## 📬 Support
 
-1. **ApprovalRequired exception** — the pre-approval pipeline raises this exception to force the UI/CLI to pause and collect user input. Schema generation is **physically impossible** without catching this and calling `approve_plan()`.
-
-2. **Layered RAG** — Azure Search (primary) → ChromaDB (local fallback) → keyword search (zero-dependency fallback). The system always works, even offline.
-
-3. **Static + LLM validation** — deterministic rules catch structural errors cheaply; LLM adds semantic validation (3NF, type correctness).
-
-4. **Session persistence** — every state transition is saved to disk. Sessions can be resumed by ID across restarts.
-
-5. **Single-responsibility agents** — each agent does exactly one thing and receives/returns a typed Pydantic model. This makes them independently testable and replaceable.
+If you have any questions or suggestions, feel free to open an issue.
