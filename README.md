@@ -53,10 +53,10 @@ DB Designer Agent/
 │   ├── query_generator.py
 │   └── __init__.py
 ├── validators.py                   # Rule-based validation & recovery
-├── erd_visualizer.py               # ERD generation + SQL DDL
-├── report_generator.py             # Final report
 ├── memory.py                       # Session persistence
-├── utils.py                        # Helper utilities
+├── utils/                          # Helper utilities
+│   ├── erd_visualizer.py           # ERD generation + SQL DDL
+|   ├── report_generator.py         # Final report
 └── .env                            # Environment variables
 ```
 
