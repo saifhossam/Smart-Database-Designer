@@ -41,20 +41,19 @@ An intelligent Streamlit application that transforms natural language requiremen
 DB Designer Agent/
 ├── app.py                          # Main Streamlit application
 ├── models.py                       # Pydantic data models
+├── validators.py  
 ├── services/
 │   ├── orchestrator.py             # Pipeline orchestration
 │   ├── llm_service.py              # LLM client factory
-│   └── __init__.py
 ├── agents/
 │   ├── requirement_analyzer.py
 │   ├── suggestion_agent.py
 │   ├── schema_designer.py
 │   ├── validation_agent.py
 │   ├── query_generator.py
-│   └── __init__.py
-├── validators.py                   # Rule-based validation & recovery
-├── memory.py                       # Session persistence
-├── utils/                          # Helper utilities
+├── memory/
+│   ├── session_store.py            # Session persistence
+├── utils/                          
 │   ├── erd_visualizer.py           # ERD generation + SQL DDL
 |   ├── report_generator.py         # Final report
 └── .env                            # Environment variables
