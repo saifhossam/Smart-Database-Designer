@@ -318,7 +318,8 @@ def run_plan_modifier(
     except Exception as exc:
         logger.error("Plan modifier failed: %s", exc)
         raw = {}
-
+    
+    # Safe extraction
     entities_raw = raw.get("suggested_entities", [])
     if not isinstance(entities_raw, list):
         entities_raw = [e.model_dump() for e in existing_plan.suggested_entities]

@@ -5,11 +5,11 @@ Validates the DatabaseSchema for structural integrity and best practices.
 
 Report filtering:
   - Only surfaces CRITICAL errors and IMPORTANT warnings.
-  - Removes repetitive / low-value noise (e.g. ENUM vs VARCHAR debates).
+  - Removes repetitive / low-value noise.
 """
+
 from __future__ import annotations
 import logging
-import re
 from typing import Any, Dict, List, Optional, Set
 
 from langchain_core.prompts import ChatPromptTemplate
@@ -17,42 +17,32 @@ from langchain_core.output_parsers import JsonOutputParser
 
 from models import (
     DatabaseSchema, ValidationResult, ValidationIssue,
-    TableDefinition, ColumnDefinition, Relationship,
+    TableDefinition
 )
 from services.llm_service import get_chat_llm
-from validators import standardize_table_names, rule_based_validation
+from validators import rule_based_validation
 
 logger = logging.getLogger(__name__)
 
-# ─── Noise patterns to suppress ───────────────────────────────────────────────
-# These are low-value, repetitive suggestions that clutter the report.
-
+# ─────────────────────────────────────────────────────────────
+# Noise patterns (STRICT – avoid over-filtering important issues)
+# ─────────────────────────────────────────────────────────────
 _SUPPRESS_PATTERNS: List[str] = [
     "enum",
-    "consider using enum",
     "varchar vs",
-    "vs varchar",
     "text vs varchar",
     "unbounded text",
-    "consider adding",
-    "you might want",
-    "could be improved",
-    "for better performance consider",
-    "n+1",           # too speculative without context
-    "scalability risk",
 ]
 
 
 def _is_noise(issue: ValidationIssue) -> bool:
-    """Return True if the issue is low-value noise that should be filtered out."""
-    msg_lower = issue.message.lower()
-    sug_lower = (issue.suggestion or "").lower()
-    combined = msg_lower + " " + sug_lower
-    return any(pat in combined for pat in _SUPPRESS_PATTERNS)
+    msg = (issue.message or "").lower()
+    sug = (issue.suggestion or "").lower()
+    combined = f"{msg} {sug}"
+    return any(p in combined for p in _SUPPRESS_PATTERNS)
 
 
 def _classify_issue(issue: ValidationIssue) -> str:
-    """Classify issues into CRITICAL, FIXABLE, and INFO categories."""
     if issue.severity == "error":
         return "CRITICAL"
     if issue.severity == "warning":
@@ -64,74 +54,56 @@ def _build_issue_detail(issue: ValidationIssue, fix_actions: List[Dict[str, Any]
     location = issue.table or "schema"
     if issue.column:
         location = f"{location}.{issue.column}"
+
     issue_type = "validation"
-    if "duplicate column" in issue.message.lower():
+    msg = issue.message.lower()
+
+    if "duplicate column" in msg:
         issue_type = "duplicate_column"
-    elif "foreign key" in issue.message.lower() or "references" in issue.message.lower():
+    elif "foreign key" in msg or "references" in msg:
         issue_type = "foreign_key"
-    elif "duplicate table" in issue.message.lower():
+    elif "duplicate table" in msg:
         issue_type = "duplicate_table"
-    elif "reserved keyword" in issue.message.lower():
+    elif "reserved keyword" in msg:
         issue_type = "reserved_keyword"
-    elif "unsupported sql type" in issue.message.lower() or "sql type" in issue.message.lower():
+    elif "sql type" in msg:
         issue_type = "data_type"
-    elif "relationship" in issue.message.lower():
+    elif "relationship" in msg:
         issue_type = "relationship"
 
     action = issue.suggestion or "review the design"
+
     detail: Dict[str, Any] = {
         "type": issue_type,
         "location": location,
         "issue": issue.message,
         "action": action,
     }
+
     for fix in fix_actions:
         if fix.get("table") == issue.table and fix.get("column") == issue.column:
-            detail["action"] = fix.get("action")
-            if fix.get("original") is not None:
-                detail["original"] = fix.get("original")
-            if fix.get("fixed_to") is not None:
-                detail["fixed_to"] = fix.get("fixed_to")
-            if fix.get("status") is not None:
-                detail["status"] = fix.get("status")
-            break
-        if fix.get("table") == issue.table and fix.get("column") is None and issue_type == fix.get("type"):
-            detail["action"] = fix.get("action")
-            if fix.get("original") is not None:
-                detail["original"] = fix.get("original")
-            if fix.get("fixed_to") is not None:
-                detail["fixed_to"] = fix.get("fixed_to")
-            if fix.get("status") is not None:
-                detail["status"] = fix.get("status")
+            detail.update(fix)
             break
 
     return detail
 
 
-# ─── LLM deep validation ──────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────
+# LLM validation
+# ─────────────────────────────────────────────────────────────
 def _llm_dynamic_validation(
     schema: DatabaseSchema,
     domain: str = "unknown",
-) -> tuple[
-    List[ValidationIssue],
-    List[ValidationIssue],
-    Optional[DatabaseSchema],
-    List[str],
-    List[Dict[str, Any]],
-]:
-    """Run the LLM-based semantic validation layer and return issues, suggestions, reasoning, alternatives, and any corrected schema."""
-    llm_issues: List[ValidationIssue] = []
-    suggestions: List[ValidationIssue] = []
-    corrected_schema: Optional[DatabaseSchema] = None
-
+):
     llm = get_chat_llm(temperature=0.0)
+
     prompt = ChatPromptTemplate.from_messages([
         ("system", _LLM_SYSTEM),
         ("human", _LLM_HUMAN),
     ])
+
     chain = prompt | llm | JsonOutputParser()
 
-    logger.info("Running dynamic LLM validation…")
     try:
         raw = chain.invoke({
             "schema_json": schema.model_dump_json(indent=2),
@@ -139,47 +111,41 @@ def _llm_dynamic_validation(
         })
     except Exception as exc:
         logger.error("LLM validation failed: %s", exc)
-        raw = {
-            "issues": [],
-            "suggestions": [],
-            "reasoning": [],
-            "alternative_designs": [],
-            "corrected_tables": [],
-        }
+        return [], [], None, [], []
 
-    llm_issues_raw = raw.get("issues", []) if isinstance(raw.get("issues"), list) else []
-    for item in llm_issues_raw:
-        try:
-            llm_issues.append(ValidationIssue(**item))
-        except Exception as exc:
-            logger.warning("Skipping invalid LLM issue: %s", exc)
+    def safe_parse(items):
+        out = []
+        for i in items or []:
+            try:
+                out.append(ValidationIssue(**i))
+            except Exception:
+                continue
+        return out
 
-    suggestions_raw = raw.get("suggestions", []) if isinstance(raw.get("suggestions"), list) else []
-    for item in suggestions_raw:
-        try:
-            suggestions.append(ValidationIssue(**item))
-        except Exception as exc:
-            logger.warning("Skipping invalid LLM suggestion: %s", exc)
+    llm_issues = safe_parse(raw.get("issues"))
+    suggestions = safe_parse(raw.get("suggestions"))
 
-    reasoning_raw = raw.get("reasoning", []) if isinstance(raw.get("reasoning"), list) else []
-    alternative_raw = raw.get("alternative_designs", []) if isinstance(raw.get("alternative_designs"), list) else []
-
-    corrected_raw = raw.get("corrected_tables", []) if isinstance(raw.get("corrected_tables"), list) else []
+    corrected_schema = None
+    corrected_raw = raw.get("corrected_tables") or []
     if corrected_raw:
         try:
-            corrected_tables = [TableDefinition(**t) for t in corrected_raw if isinstance(t, dict)]
-            if corrected_tables:
-                corrected_schema = DatabaseSchema(
-                    tables=corrected_tables,
-                    relationships=schema.relationships,
-                    normalization_level=schema.normalization_level,
-                    version=schema.version + 1,
-                )
-        except Exception as exc:
-            logger.warning("Could not parse corrected_tables from LLM: %s", exc)
+            corrected_tables = [TableDefinition(**t) for t in corrected_raw]
+            corrected_schema = DatabaseSchema(
+                tables=corrected_tables,
+                relationships=schema.relationships,
+                normalization_level=schema.normalization_level,
+                version=schema.version + 1,
+            )
+        except Exception:
+            pass
 
-    return llm_issues, suggestions, corrected_schema, reasoning_raw, alternative_raw
-
+    return (
+        llm_issues,
+        suggestions,
+        corrected_schema,
+        raw.get("reasoning", []),
+        raw.get("alternative_designs", []),
+    )
 
 # ─── LLM deep validation ──────────────────────────────────────────────────────
 
@@ -231,9 +197,7 @@ GLOBAL SAFETY & INTEGRITY RULES — NEVER VIOLATE THESE:
      }}
 """
 
-# ─────────────────────────────────────────────────────────────────────────────
-# LLM Deep Validation Prompt (Updated)
-# ─────────────────────────────────────────────────────────────────────────────
+
 _LLM_SYSTEM = """{{GLOBAL_VALIDATION_RULES}}
 
 You are a senior database architect performing final validation of a database schema.
@@ -283,58 +247,86 @@ Additional Guidelines:
 _LLM_HUMAN = "Review this schema in domain context:\n\nDomain: {domain}\n\n{schema_json}"
 
 
+# ─────────────────────────────────────────────────────────────
+# MAIN PIPELINE
+# ─────────────────────────────────────────────────────────────
 def run_validation_agent(schema: DatabaseSchema, domain: str = "unknown") -> ValidationResult:
-    """Validate schema with a hybrid rule-based and LLM validation pipeline."""
+
+    # 1. Rule-based validation
     rule_schema, rule_issues, rule_fixes, fix_actions = rule_based_validation(schema)
-    llm_issues, llm_suggestions, llm_corrected_schema, llm_reasoning, llm_alternatives = _llm_dynamic_validation(
-        rule_schema,
-        domain=domain,
-    )
+
+    # 2. LLM validation
+    llm_issues, llm_suggestions, llm_corrected_schema, reasoning, alternatives = \
+        _llm_dynamic_validation(rule_schema, domain)
 
     final_schema = llm_corrected_schema or rule_schema
-    merged_issues: List[ValidationIssue] = []
-    seen: Set[str] = set()
-    for issue in rule_issues + llm_issues:
-        key = f"{issue.severity}:{issue.table}:{issue.message[:60]}"
-        if key not in seen:
-            seen.add(key)
-            merged_issues.append(issue)
 
-    for issue in merged_issues:
+    # 3. Merge + deduplicate + REMOVE NOISE
+    merged: List[ValidationIssue] = []
+    seen: Set[str] = set()
+
+    for issue in rule_issues + llm_issues:
+
+        # 🚫 REMOVE NOISE
+        if _is_noise(issue):
+            continue
+
+        key = f"{issue.severity}:{issue.table}:{issue.message[:80]}"
+        if key in seen:
+            continue
+
+        seen.add(key)
+        merged.append(issue)
+
+    # 4. Classify
+    for issue in merged:
         issue.category = _classify_issue(issue)
 
-    critical_issues = [
-        issue.message for issue in merged_issues
-        if issue.severity == "error" or issue.category == "CRITICAL"
+    # 5. STRICT FILTER (only CRITICAL + FIXABLE)
+    filtered = [
+        i for i in merged
+        if i.category in ("CRITICAL", "FIXABLE")
     ]
 
-    final_corrected_schema = final_schema.model_dump() if final_schema else None
-    is_valid = not any(issue.severity == "error" for issue in merged_issues)
-    validity = "valid" if is_valid and not any(issue.severity == "warning" for issue in merged_issues) else (
-        "invalid" if any(issue.severity == "error" for issue in merged_issues) else "needs_improvement"
+    # 6. Final status
+    is_valid = not any(i.severity == "error" for i in filtered)
+
+    validity = (
+        "valid"
+        if is_valid and not any(i.severity == "warning" for i in filtered)
+        else "invalid"
+        if not is_valid
+        else "needs_improvement"
     )
+
     issue_details = [
-        _build_issue_detail(issue, fix_actions)
-        for issue in merged_issues
+        _build_issue_detail(i, fix_actions)
+        for i in filtered
     ]
+
+    critical_issues = [
+        i.message for i in filtered
+        if i.category == "CRITICAL"
+    ]
+
     status = "fixed" if fix_actions else ("warning" if issue_details else "clean")
 
     return ValidationResult(
         is_valid=is_valid,
         status=status,
         validity=validity,
-        issues=[issue for issue in merged_issues if issue.severity != "info" or issue.category != "INFO"],
+        issues=filtered,
         issues_detected=issue_details,
         suggestions=llm_suggestions,
         auto_fixes=fix_actions,
-        reasoning=llm_reasoning,
-        alternative_designs=llm_alternatives,
-        final_schema=final_corrected_schema,
+        reasoning=reasoning,
+        alternative_designs=alternatives,
+        final_schema=final_schema.model_dump(),
         corrected_schema=final_schema,
         resolved_issues=rule_fixes,
         rule_based_fixes=rule_fixes,
         rule_based_issues=rule_issues,
         llm_suggestions=llm_suggestions,
         critical_issues=critical_issues,
-        final_corrected_schema=final_corrected_schema,
+        final_corrected_schema=final_schema.model_dump(),
     )
