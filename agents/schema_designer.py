@@ -1,5 +1,7 @@
 """
-Agent 3 – Schema Designer (Fixed & Strengthened)
+Agent 3 – Schema Designer
+==========================
+Converts an APPROVED SuggestionPlan into a fully normalised DatabaseSchema.
 """
 from __future__ import annotations
 import logging
@@ -7,75 +9,89 @@ from typing import Any, Dict, List
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
-
 from models import SuggestionPlan, DatabaseSchema, TableDefinition, Relationship
 from services.llm_service import get_chat_llm
-from validators import production_validation, recover_missing_tables
+from validators import production_validation
 
 logger = logging.getLogger(__name__)
 
 _SYSTEM = """You are a senior database engineer converting a design plan into a production-ready schema.
 
-Return ONLY valid JSON (no markdown, no extra text):
+Return ONLY valid JSON (no markdown):
 {{
-  "tables": [ ... ],
-  "relationships": [ ... ],
+  "tables": [
+    {{
+      "name": "table_name",
+      "description": "what this table stores",
+      "columns": [
+        {{
+          "name": "id",
+          "data_type": "UUID",
+          "constraints": ["PRIMARY KEY", "NOT NULL", "DEFAULT gen_random_uuid()"],
+          "references": null,
+          "description": "Primary key"
+        }}
+      ],
+      "indexes": ["CREATE INDEX idx_table_col ON table_name(col)"]
+    }}
+  ],
+  "relationships": [
+    {{
+      "from_entity": "TableA",
+      "to_entity": "TableB",
+      "relationship_type": "one-to-many",
+      "label": "has"
+    }}
+  ],
   "normalization_level": "3NF"
 }}
 
-CRITICAL RULES (must follow strictly):
+Rules:
+1. Every table MUST have an id UUID PRIMARY KEY.
+2. CRITICAL: For every relationship defined in the plan, you MUST create a corresponding Foreign Key column in the child table.
+3. All FK columns MUST have the 'references' property set to 'parent_table(id)'.
+4. Use snake_case for all names.
+5. Include created_at TIMESTAMP NOT NULL DEFAULT NOW() on every table with > 2 columns.
 
-1. Include EVERY entity from the suggestion plan as a table.
-2. Every table MUST have: 
-   - "id" UUID PRIMARY KEY with DEFAULT gen_random_uuid()
-   - created_at TIMESTAMP NOT NULL DEFAULT NOW()
-3. For EVERY relationship in the plan:
-   - If one-to-many or many-to-one → Add FK column in the "many" side.
-   - If many-to-many → Create explicit junction table (with two FKs).
-   - Always set the "references" field correctly as "parent_table(id)".
-4. Use snake_case only.
-5. Never use SQL reserved keywords as table/column names.
-6. Make sure all FK columns exist in the child tables.
-
-Compare the output with the input plan carefully before responding."""
+DOUBEL-CHECK: Compare your 'tables' columns against the 'relationships' list to ensure no connection is missing.
+CRITICAL: Include ALL entities from the plan. Do not drop any.
+Avoid using SQL reserved keywords for table or column names. If a name like table is requested, rename it to [entity]_table.
+"""
 
 _HUMAN = """Approved Suggestion Plan:
 {plan_json}
 
-Generate the complete production-ready normalized schema now."""
+Generate the complete production-ready schema for ALL entities above."""
 
 
 def run_schema_designer(plan: SuggestionPlan) -> DatabaseSchema:
+    from .validation_agent import run_validation_agent 
+    
     llm = get_chat_llm(temperature=0.0)
     prompt = ChatPromptTemplate.from_messages([("system", _SYSTEM), ("human", _HUMAN)])
     chain = prompt | llm | JsonOutputParser()
 
-    logger.info("Running Schema Designer Agent…")
+    logger.info("Running Schema Designer…")
     raw = chain.invoke({"plan_json": plan.model_dump_json(indent=2)})
 
-    # Parse tables
     tables_raw = raw.get("tables", []) if isinstance(raw.get("tables"), list) else []
+    relationships_raw = raw.get("relationships", []) if isinstance(raw.get("relationships"), list) else []
+
     tables = []
     for t in tables_raw:
+        if "columns" in t:
+            for col in t["columns"]:
+                ref = col.get("references")
+                if isinstance(ref, dict):
+                    table_name = ref.get("table") or ref.get("table_name")
+                    col_name = ref.get("column") or ref.get("column_name")
+                    col["references"] = f"{table_name}({col_name})" if table_name and col_name else table_name
         try:
-            # Fix references if returned as dict
-            for col in t.get("columns", []):
-                if isinstance(col.get("references"), dict):
-                    tbl = col["references"].get("table") or col["references"].get("table_name")
-                    col_name = col["references"].get("column") or "id"
-                    col["references"] = f"{tbl}({col_name})" if tbl else None
             tables.append(TableDefinition(**t))
         except Exception as exc:
-            logger.warning("Skipping invalid table from LLM: %s", exc)
+            logger.warning("Skipping invalid table: %s", exc)
 
-    # Parse relationships
-    relationships_raw = raw.get("relationships", []) if isinstance(raw.get("relationships"), list) else []
-    relationships = []
-    for r in relationships_raw:
-        try:
-            relationships.append(Relationship(**r))
-        except Exception as exc:
-            logger.warning("Skipping invalid relationship: %s", exc)
+    relationships = [Relationship(**r) for r in relationships_raw if isinstance(r, dict)]
 
     schema = DatabaseSchema(
         tables=tables,
@@ -83,12 +99,13 @@ def run_schema_designer(plan: SuggestionPlan) -> DatabaseSchema:
         normalization_level=raw.get("normalization_level", "3NF"),
     )
 
-    logger.info(f"Schema Designer returned {len(schema.tables)} tables and {len(schema.relationships)} relationships")
+    validation_result = run_validation_agent(schema)
 
-    # === Recovery & Sync Step ===
-    schema = recover_missing_tables(plan, schema)                    # recover missing tables
-    schema, _ = production_validation(plan, schema)                  # standardize + repair
+    if validation_result.corrected_schema:
+        schema = validation_result.corrected_schema
+        schema.__dict__["fix_log"] = validation_result.resolved_issues or []
+    else:
+        schema.__dict__["fix_log"] = []
 
-    logger.info(f"After recovery & production validation → {len(schema.tables)} tables, {len(schema.relationships)} relationships")
-
+    schema, report = production_validation(plan, schema)
     return schema

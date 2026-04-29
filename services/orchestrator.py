@@ -94,10 +94,7 @@ def run_post_approval_pipeline(session: SessionState) -> SessionState:
     session.status = "designing"
     save_session(session)
     session.database_schema = run_schema_designer(session.suggestion_plan)
-    
-    logger.info(f"Schema Designer completed: {len(session.database_schema.tables)} tables, "
-                f"{len(session.database_schema.relationships)} relationships")
-    
+
     session.database_schema, vreport = production_validation(
         session.suggestion_plan, session.database_schema
     )

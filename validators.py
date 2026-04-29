@@ -261,14 +261,13 @@ def production_validation(
     plan.suggested_relationships = standardize_relationship_names(plan.suggested_relationships)
     schema = standardize_table_names(schema)
 
+    fix_log: List[str] = []
+
     schema = recover_missing_tables(plan, schema)
 
-    # New sync step
-    schema = sync_relationships_and_foreign_keys(plan, schema)
-
     schema, removed_rels = validate_and_repair_relationships(schema)
+    fix_log.extend(removed_rels)
 
-    fix_log = getattr(schema, 'fix_log', []) + removed_rels
     schema.fix_log = fix_log
 
     return schema, {
@@ -276,53 +275,6 @@ def production_validation(
         "removed_relationships": removed_rels,
     }
 
-def sync_relationships_and_foreign_keys(
-    plan: SuggestionPlan, 
-    schema: DatabaseSchema
-) -> DatabaseSchema:
-    """Ensure all relationships from plan exist in schema and create missing FK columns."""
-    logger.info("Syncing relationships and foreign keys from SuggestionPlan...")
-
-    table_map = {t.name: t for t in schema.tables}
-    existing_rel_set = {(r.from_entity, r.to_entity) for r in schema.relationships}
-
-    for rel in plan.suggested_relationships:
-        from_name = normalize_naming(rel.from_entity)
-        to_name = normalize_naming(rel.to_entity)
-
-        if from_name not in table_map or to_name not in table_map:
-            continue
-
-        rel_key = (from_name, to_name)
-        if rel_key in existing_rel_set or (to_name, from_name) in existing_rel_set:
-            continue  # already exists
-
-        # Add the relationship
-        schema.relationships.append(Relationship(
-            from_entity=from_name,
-            to_entity=to_name,
-            relationship_type=rel.relationship_type,
-            label=rel.label,
-        ))
-
-        # Add FK column in the "many" side (simple heuristic)
-        child_table = table_map.get(to_name) if rel.relationship_type in ("one-to-many", "many-to-one") else None
-        if not child_table and rel.relationship_type == "many-to-many":
-            # For many-to-many we expect junction table already created by LLM
-            continue
-
-        if child_table and from_name not in [c.name for c in child_table.columns]:
-            fk_col_name = f"{from_name}_id"
-            child_table.columns.append(ColumnDefinition(
-                name=fk_col_name,
-                data_type="UUID",
-                constraints=["NOT NULL"],
-                references=f"{from_name}(id)",
-                description=f"Foreign key to {from_name}",
-            ))
-            logger.info(f"Added missing FK column {fk_col_name} in table {to_name}")
-
-    return schema
 
 def validate_and_repair_relationships(
     schema: DatabaseSchema,

@@ -29,3 +29,4 @@ def get_embeddings():
         api_version=os.environ.get("AZURE_OPENAI_API_VERSION", "2024-12-01-preview"),
         azure_deployment=os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "text-embedding-3-small"),
     )
+
