@@ -9,7 +9,6 @@ import logging
 import re
 import sqlite3
 from pathlib import Path
-from typing import Optional
 
 from models import DatabaseSchema, SuggestionPlan
 

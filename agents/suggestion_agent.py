@@ -63,6 +63,7 @@ Return ONLY valid JSON (no markdown):
 }}
 
 Rules (ALWAYS apply):
+0. Use only the requirement analysis provided. Do not invent facts, policies, or entities that are not implied by those inputs.
 1. Every entity MUST have an id UUID primary key.
 2. Every foreign key MUST be explicit in attributes.
 3. Normalise to 3NF.
@@ -72,9 +73,11 @@ Rules (ALWAYS apply):
 7. Every suggested entity should participate in at least one relationship unless it is clearly an isolated lookup/reference table.
 8. Add NOT NULL where semantically required.
 9. Use snake_case for all names.
+10. If inputs are missing or unclear, choose the smallest conservative schema and state the uncertainty in rationale.
 
 CRITICAL: Return valid JSON. Each entity MUST appear in suggested_entities.
-STRICTLY FORBIDDEN to use SQL reserved words (like order, table, user, transaction) for entity or attribute names. Use descriptive alternatives (e.g., customer_order, restaurant_table, account_user).
+STRICTLY FORBIDDEN to use SQL reserved words for entity or attribute names.
+Do not rely on quoting. Use descriptive alternatives (e.g., user_account, order_record, group_name, leave_table).
 """
 
 _HUMAN = """Requirement Analysis:
@@ -143,6 +146,16 @@ def _enforce_relationships(
     return relationships
 
 
+def _ensure_primary_key(entity: Entity) -> Entity:
+    if not any(attr.is_primary_key for attr in entity.attributes):
+        entity.attributes.insert(0, Attribute(
+            name="id", data_type="UUID",
+            is_primary_key=True, is_nullable=False,
+            description="Primary key",
+        ))
+    return entity
+
+
 def run_suggestion_agent(
     analysis: RequirementAnalysis,
     rag_context: str = "",
@@ -166,13 +179,7 @@ def run_suggestion_agent(
     for e in entities_raw:
         try:
             entity = Entity(**e)
-            if not any(a.is_primary_key for a in entity.attributes):
-                entity.attributes.insert(0, Attribute(
-                    name="id", data_type="UUID",
-                    is_primary_key=True, is_nullable=False,
-                    description="Primary key",
-                ))
-            entities.append(entity)
+            entities.append(_ensure_primary_key(entity))
         except Exception as exc:
             logger.warning("Skipping invalid entity: %s", exc)
 
@@ -217,11 +224,15 @@ def run_suggestion_agent(
 
 _MODIFY_SYSTEM = """You are a senior database architect. Update the existing suggestion plan to reflect the user's modification request.
 Return ONLY valid JSON matching the SuggestionPlan schema. Preserve unchanged entities, relationships, and features.
+Use only the existing plan, original requirement analysis, and modification instruction. Do not invent unrelated entities, relationships, features, or business rules.
 If the user asks to add or remove entities, reflect that in suggested_entities. If they ask to modify relationships, update suggested_relationships accordingly.
 If the user asks to add optional features, keep existing optional_features and append the new ones instead of replacing them.
 If the user requests optional features, also add any supporting entities and relationships required so the ERD can reflect those features.
 Ensure the final modified plan includes at least one relationship between entities whenever more than one entity exists.
+If the modification is missing or unclear, preserve the existing plan and explain the uncertainty in rationale.
 Do not include narrative text outside the JSON response.
+STRICTLY FORBIDDEN to use SQL reserved words for entity or attribute names.
+Do not rely on quoting. Use descriptive alternatives (e.g., user_account, order_record, group_name, leave_table).
 """
 
 _MODIFY_HUMAN = """Existing suggestion plan:
@@ -278,13 +289,7 @@ def run_plan_modifier(
     for e in entities_raw:
         try:
             entity = Entity(**e)
-            if not any(a.is_primary_key for a in entity.attributes):
-                entity.attributes.insert(0, Attribute(
-                    name="id", data_type="UUID",
-                    is_primary_key=True, is_nullable=False,
-                    description="Primary key",
-                ))
-            entities.append(entity)
+            entities.append(_ensure_primary_key(entity))
         except Exception as exc:
             logger.warning("Skipping invalid modified entity: %s", exc)
 

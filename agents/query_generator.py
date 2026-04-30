@@ -37,10 +37,13 @@ Output format:
 }}
 
 Rules:
+- Use only the provided schema. Do not reference tables, columns, relationships, or business concepts that are not present in the schema.
+- Validate table names, column names, aliases, and generated index-like names before output. Never use SQL reserved keywords as identifiers and never rely on quoting to solve keyword conflicts.
 - Each table MUST have exactly 4 queries: INSERT, SELECT, UPDATE, DELETE (as a list of strings).
 - Analytical queries should JOIN across tables and answer business questions.
 - Use PostgreSQL syntax ($1, $2 placeholders).
 - Add SQL comments on complex queries.
+- If the schema lacks enough relationships for analytical queries, return an empty analytical_queries list instead of inventing joins.
 
 CRITICAL: Return valid JSON. crud_queries values must be arrays of strings (NOT objects).
 """

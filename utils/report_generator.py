@@ -3,15 +3,12 @@ Final Report Generator (Updated with Fix Reporting)
 ===================================================
 """
 from __future__ import annotations
-import logging
 from typing import Any, Dict, Optional
 
 from models import (
     RequirementAnalysis, SuggestionPlan,
     DatabaseSchema, QuerySet, ValidationResult,
 )
-
-logger = logging.getLogger(__name__)
 
 def generate_final_report(
     session_id: str,

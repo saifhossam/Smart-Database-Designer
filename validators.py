@@ -20,6 +20,25 @@ from models import (
 
 logger = logging.getLogger(__name__)
 
+_SQL_RESERVED_KEYWORDS = {
+    "add", "all", "alter", "and", "as", "asc", "between", "by", "case", "check",
+    "column", "constraint", "create", "delete", "desc", "distinct", "drop", "else",
+    "exists", "foreign", "from", "group", "having", "in", "index", "insert", "into",
+    "join", "key", "leave", "like", "limit", "not", "null", "or", "order",
+    "primary", "references", "select", "set", "table", "then", "transaction",
+    "union", "unique", "update", "user", "value", "values", "when", "where",
+}
+
+_RESERVED_RENAMES = {
+    "group": "group_name",
+    "index": "index_record",
+    "leave": "leave_table",
+    "order": "order_record",
+    "table": "data_table",
+    "user": "user_account",
+    "value": "value_field",
+}
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Naming helpers
@@ -33,33 +52,103 @@ def normalize_naming(name: str) -> str:
     return name.strip("_")
 
 
+def safe_sql_identifier(name: str, kind: str = "field") -> str:
+    """Normalize an identifier and rename reserved SQL keywords without quoting."""
+    normalized = normalize_naming(name)
+    if normalized not in _SQL_RESERVED_KEYWORDS:
+        return normalized
+    if normalized in _RESERVED_RENAMES:
+        return _RESERVED_RENAMES[normalized]
+    suffix = "tbl" if kind == "table" else "col"
+    return f"{normalized}_{suffix}"
+
+
+def _rename_identifier(name: str, kind: str, fix_log: List[str], scope: str = "") -> str:
+    safe_name = safe_sql_identifier(name, kind=kind)
+    normalized = normalize_naming(name)
+    if safe_name != normalized:
+        location = f" in {scope}" if scope else ""
+        fix_log.append(
+            f"Renamed reserved SQL identifier '{normalized}' to '{safe_name}'{location}."
+        )
+    return safe_name
+
+
+def _parse_reference(reference: str) -> Tuple[str, str] | None:
+    parts = reference.strip().split("(", 1)
+    if len(parts) != 2:
+        return None
+    table_name = parts[0].strip()
+    column_name = parts[1].rstrip(") ").strip()
+    if not table_name or not column_name:
+        return None
+    return table_name, column_name
+
+
+def _format_reference(table_name: str, column_name: str) -> str:
+    return f"{table_name}({column_name})"
+
+
 def standardize_entity_names(entities: List[Entity]) -> List[Entity]:
     for entity in entities:
-        entity.name = normalize_naming(entity.name)
+        entity.name = safe_sql_identifier(entity.name, kind="table")
         for attr in entity.attributes:
-            attr.name = normalize_naming(attr.name)
+            attr.name = safe_sql_identifier(attr.name, kind="column")
+            if attr.references_table:
+                attr.references_table = safe_sql_identifier(attr.references_table, kind="table")
+            if attr.references_column:
+                attr.references_column = safe_sql_identifier(attr.references_column, kind="column")
     return entities
 
 
 def standardize_relationship_names(relationships: List[Relationship]) -> List[Relationship]:
     for rel in relationships:
-        rel.from_entity = normalize_naming(rel.from_entity)
-        rel.to_entity = normalize_naming(rel.to_entity)
+        rel.from_entity = safe_sql_identifier(rel.from_entity, kind="table")
+        rel.to_entity = safe_sql_identifier(rel.to_entity, kind="table")
     return relationships
 
 
 def standardize_table_names(schema: DatabaseSchema) -> DatabaseSchema:
+    fix_log: List[str] = []
+    table_renames: Dict[str, str] = {}
+    column_renames: Dict[str, Dict[str, str]] = {}
+
     for table in schema.tables:
-        table.name = normalize_naming(table.name)
+        original_table_name = normalize_naming(table.name)
+        table.name = _rename_identifier(table.name, "table", fix_log)
+        table_renames[original_table_name] = table.name
+        column_renames.setdefault(table.name, {})
+
         for col in table.columns:
-            col.name = normalize_naming(col.name)
-            if col.references:
-                parts = col.references.split("(")
-                if len(parts) == 2:
-                    col.references = f"{normalize_naming(parts[0])}({parts[1]}"
+            original_column_name = normalize_naming(col.name)
+            col.name = _rename_identifier(col.name, "column", fix_log, table.name)
+            column_renames[table.name][original_column_name] = col.name
+
+    for table in schema.tables:
+        for col in table.columns:
+            if not col.references:
+                continue
+            parsed = _parse_reference(col.references)
+            if not parsed:
+                continue
+            ref_table, ref_column = parsed
+            safe_ref_table = safe_sql_identifier(ref_table, kind="table")
+            safe_ref_table = table_renames.get(normalize_naming(ref_table), safe_ref_table)
+            safe_ref_column = safe_sql_identifier(ref_column, kind="column")
+            safe_ref_column = column_renames.get(safe_ref_table, {}).get(
+                normalize_naming(ref_column),
+                safe_ref_column,
+            )
+            col.references = _format_reference(safe_ref_table, safe_ref_column)
+
     for rel in schema.relationships:
-        rel.from_entity = normalize_naming(rel.from_entity)
-        rel.to_entity = normalize_naming(rel.to_entity)
+        from_name = safe_sql_identifier(rel.from_entity, kind="table")
+        to_name = safe_sql_identifier(rel.to_entity, kind="table")
+        rel.from_entity = table_renames.get(normalize_naming(rel.from_entity), from_name)
+        rel.to_entity = table_renames.get(normalize_naming(rel.to_entity), to_name)
+
+    if fix_log:
+        schema.fix_log.extend(fix_log)
     return schema
 
 
@@ -92,8 +181,9 @@ def rule_based_validation(
     schema: DatabaseSchema,
 ) -> Tuple[DatabaseSchema, List[ValidationIssue], List[str], List[Dict[str, Any]]]:
 
+    schema = standardize_table_names(schema)
     issues: List[ValidationIssue] = []
-    fix_log: List[str] = []
+    fix_log: List[str] = list(getattr(schema, "fix_log", []) or [])
     fix_actions: List[Dict[str, Any]] = []
 
     table_map = {t.name: t for t in schema.tables}
@@ -210,10 +300,13 @@ def _entity_attrs_to_columns(entity: Entity) -> List[ColumnDefinition]:
 
         references = None
         if attr.is_foreign_key and attr.references_table:
-            references = f"{normalize_naming(attr.references_table)}({attr.references_column or 'id'})"
+            references = _format_reference(
+                safe_sql_identifier(attr.references_table, kind="table"),
+                safe_sql_identifier(attr.references_column or "id", kind="column"),
+            )
 
         columns.append(ColumnDefinition(
-            name=attr.name,
+            name=safe_sql_identifier(attr.name, kind="column"),
             data_type=attr.data_type,
             constraints=constraints,
             references=references,
@@ -238,7 +331,7 @@ def recover_missing_tables(plan: SuggestionPlan, schema: DatabaseSchema) -> Data
         if entity.name not in schema_names:
             logger.warning("Reconstructing missing table: %s", entity.name)
             schema.tables.append(TableDefinition(
-                name=entity.name,
+                name=safe_sql_identifier(entity.name, kind="table"),
                 columns=_entity_attrs_to_columns(entity),
                 description=entity.description,
             ))
@@ -261,7 +354,7 @@ def production_validation(
     plan.suggested_relationships = standardize_relationship_names(plan.suggested_relationships)
     schema = standardize_table_names(schema)
 
-    fix_log: List[str] = []
+    fix_log: List[str] = list(getattr(schema, "fix_log", []) or [])
 
     schema = recover_missing_tables(plan, schema)
 

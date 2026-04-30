@@ -5,7 +5,6 @@ Converts an APPROVED SuggestionPlan into a fully normalised DatabaseSchema.
 """
 from __future__ import annotations
 import logging
-from typing import Any, Dict, List
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
@@ -47,15 +46,18 @@ Return ONLY valid JSON (no markdown):
 }}
 
 Rules:
+0. Use only the approved suggestion plan. Do not add unrelated tables, columns, relationships, or business rules.
 1. Every table MUST have an id UUID PRIMARY KEY.
 2. CRITICAL: For every relationship defined in the plan, you MUST create a corresponding Foreign Key column in the child table.
 3. All FK columns MUST have the 'references' property set to 'parent_table(id)'.
 4. Use snake_case for all names.
 5. Include created_at TIMESTAMP NOT NULL DEFAULT NOW() on every table with > 2 columns.
+6. If any plan detail is ambiguous, choose the smallest conservative interpretation and keep all planned entities present.
+7. Validate every table, column, alias, and index name against SQL reserved keywords before returning JSON.
 
 DOUBEL-CHECK: Compare your 'tables' columns against the 'relationships' list to ensure no connection is missing.
 CRITICAL: Include ALL entities from the plan. Do not drop any.
-Avoid using SQL reserved keywords for table or column names. If a name like table is requested, rename it to [entity]_table.
+Avoid using SQL reserved keywords for identifiers and do not rely on quoting. Rename conflicts semantically when possible: user -> user_account, order -> order_record, group -> group_name, leave -> leave_table.
 """
 
 _HUMAN = """Approved Suggestion Plan:

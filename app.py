@@ -10,7 +10,6 @@ Interactive interface with:
 """
 from __future__ import annotations
 import os
-import json
 import logging
 
 import streamlit as st
@@ -32,7 +31,7 @@ except ImportError:
     pass
 
 from models import SessionState
-from memory import save_session, load_session, list_sessions, clear_sessions
+from memory import load_session, list_sessions, clear_sessions
 from services.orchestrator import (
     run_pre_approval_pipeline,
     run_post_approval_pipeline,
@@ -45,8 +44,6 @@ from utils import (
     build_erd_html_from_plan,
     build_erd_html_from_schema,
     generate_sqlite_ddl,
-    create_sqlite_database,
-    generate_final_report,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -494,8 +491,6 @@ def render_results_phase(session: SessionState) -> None:
         # Schema Validation Status
         if validation.is_valid:
             st.success("**Schema Validation Passed**")
-        else:
-            st.error("**Schema Requires Attention**")
 
 
         # 2. Suggestions for Improvement — SECOND
@@ -542,7 +537,7 @@ def render_results_phase(session: SessionState) -> None:
         # 4. Errors — LAST
         errors = [i for i in validation.issues if i.severity == "error"]
         if errors:
-            st.markdown("#### 🔴 ")
+            st.markdown("#### 🔴 Attention")
             for issue in errors:
                 loc = f"**[{issue.table}]**" if issue.table else ""
                 if issue.column:
