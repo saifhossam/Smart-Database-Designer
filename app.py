@@ -485,7 +485,7 @@ def render_results_phase(session: SessionState) -> None:
 
     # ==================== VALIDATION REPORT TAB (REORDERED) ====================
     with tab_validation:
-        st.markdown("### ✅ Validation Report")
+        st.markdown("### 🖨 Validation Report")
 
         if not validation:
             st.info("No validation results available yet.")
@@ -495,25 +495,8 @@ def render_results_phase(session: SessionState) -> None:
         if validation.is_valid:
             st.success("**Schema Validation Passed**")
         else:
-            st.error("**Schema Validation Failed**")
+            st.error("**Schema Requires Attention**")
 
-        # 1. All Validation Checks — FIRST
-        st.markdown("#### All Validation Checks")
-        checks = [
-            "Primary keys defined for all tables",
-            "Foreign keys reference valid tables",
-            "Proper normalization (3NF)",
-            "Audit fields and data types are appropriate",
-            "Semantic consistency confirmed"
-        ]
-
-        for check in checks:
-            st.markdown(f"""
-            <div style="background: #1a2a1f; border-left: 5px solid #4ade80; padding: 10px 16px; 
-                        border-radius: 6px; margin: 6px 0; color: #a1e8b8;">
-                ✅ {check}
-            </div>
-            """, unsafe_allow_html=True)
 
         # 2. Suggestions for Improvement — SECOND
         suggestions = []
@@ -559,7 +542,7 @@ def render_results_phase(session: SessionState) -> None:
         # 4. Errors — LAST
         errors = [i for i in validation.issues if i.severity == "error"]
         if errors:
-            st.markdown("#### 🔴 Errors")
+            st.markdown("#### 🔴 ")
             for issue in errors:
                 loc = f"**[{issue.table}]**" if issue.table else ""
                 if issue.column:
